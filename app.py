@@ -1,16 +1,18 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
-import sqlite3
 import os
+import sqlite3
+from flask import Flask, render_template, request, redirect, url_for, flash
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
 
-DATABASE = 'users.db'  # SQLite database file
+# Use the '/tmp' directory for SQLite to persist within the current execution
+DATABASE = '/tmp/users.db'
 
 # Function to get a database connection
 def get_db():
     conn = sqlite3.connect(DATABASE)
     return conn
+
 
 # Create users table if it doesn't exist
 def init_db():
@@ -23,42 +25,21 @@ def init_db():
                 username TEXT NOT NULL,
                 password TEXT NOT NULL,
                 balance INTEGER NOT NULL DEFAULT 100,
-                tokens INTEGER NOT NULL DEFAULT 0,
-                is_admin BOOLEAN NOT NULL DEFAULT 0
+                is_admin BOOLEAN NOT NULL DEFAULT FALSE
             )
         ''')
         conn.commit()
-
-        # Set the first user as admin
-        cursor.execute('SELECT COUNT(*) FROM users')
-        user_count = cursor.fetchone()[0]
-        if user_count == 0:
-            cursor.execute("INSERT INTO users (username, password, balance, tokens, is_admin) VALUES (?, ?, ?, ?, ?)",
-                           ('admin', 'adminpassword', 100, 99999999, 1))  # Create an admin user with infinite tokens
-            conn.commit()
-
         conn.close()
+
 
 @app.before_first_request
 def before_first_request():
     init_db()  # Ensure database and tables are created before the first request is handled
 
+
 @app.route('/')
 def home():
-    username = session.get('username')
-    if username:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT username, tokens FROM users WHERE username = ?", (username,))
-        user = cursor.fetchone()
-        conn.close()
-        if user:
-            return render_template('index.html', page='home', page_title="Home", username=user[0], tokens=user[1], is_admin=user[1] == 'admin')
-        else:
-            flash("User not found!", "error")
-            return redirect(url_for('home'))
-    else:
-        return redirect(url_for('login'))
+    return render_template('index.html')
 
 
 @app.route('/signup', methods=['GET', 'POST'])
@@ -71,12 +52,22 @@ def signup():
             flash("Username and password are required!", "error")
             return redirect(url_for('signup'))
 
-        # Insert the new user into the database
         conn = get_db()
         cursor = conn.cursor()
+
+        # Check if the user is the first user (admin)
+        cursor.execute("SELECT COUNT(*) FROM users")
+        count = cursor.fetchone()[0]
+
+        if count == 0:
+            # The first user is the admin
+            is_admin = True
+        else:
+            is_admin = False
+
         try:
-            cursor.execute("INSERT INTO users (username, password, balance, tokens) VALUES (?, ?, ?, ?)",
-                           (username, password, 100, 0))  # Initial balance 100, no tokens
+            cursor.execute("INSERT INTO users (username, password, balance, is_admin) VALUES (?, ?, ?, ?)",
+                           (username, password, 100, is_admin))  # Initial balance 100
             conn.commit()
             flash("Account created successfully!", "success")
             return redirect(url_for('home'))
@@ -86,7 +77,7 @@ def signup():
         finally:
             conn.close()
 
-    return render_template('index.html', page='signup', page_title="Sign Up")
+    return render_template('signup.html')
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -106,107 +97,88 @@ def login():
         conn.close()
 
         if user:
-            session['username'] = username  # Store username in session
             flash("Login successful!", "success")
             return redirect(url_for('home'))
         else:
             flash("Invalid username or password!", "error")
             return redirect(url_for('login'))
 
-    return render_template('index.html', page='login', page_title="Login")
-
-
-@app.route('/logout')
-def logout():
-    session.pop('username', None)
-    flash("You have been logged out.", "info")
-    return redirect(url_for('home'))
+    return render_template('login.html')
 
 
 @app.route('/transfer', methods=['GET', 'POST'])
 def transfer():
     if request.method == 'POST':
-        from_user = session.get('username')
+        from_user = request.form['from_user']
         to_user = request.form['to_user']
         amount = int(request.form['amount'])
 
-        if not from_user or not to_user or amount <= 0:
-            flash("All fields are required, and the amount must be greater than 0!", "error")
+        if from_user == to_user:
+            flash("You cannot transfer tokens to yourself.", "error")
             return redirect(url_for('transfer'))
 
         conn = get_db()
         cursor = conn.cursor()
 
-        # Get the users' token balances
-        cursor.execute("SELECT * FROM users WHERE username = ?", (from_user,))
-        from_user_data = cursor.fetchone()
-        cursor.execute("SELECT * FROM users WHERE username = ?", (to_user,))
-        to_user_data = cursor.fetchone()
+        # Get balances
+        cursor.execute("SELECT balance FROM users WHERE username = ?", (from_user,))
+        from_balance = cursor.fetchone()
 
-        if not from_user_data:
-            flash(f"User {from_user} not found!", "error")
-            return redirect(url_for('transfer'))
-        
-        if not to_user_data:
-            flash(f"User {to_user} not found!", "error")
+        cursor.execute("SELECT balance FROM users WHERE username = ?", (to_user,))
+        to_balance = cursor.fetchone()
+
+        if not from_balance or not to_balance:
+            flash("One or both users do not exist.", "error")
             return redirect(url_for('transfer'))
 
-        # Regular users can only transfer their own tokens
-        if from_user_data[4] < amount and from_user_data[5] != 1:  # Admin has infinite tokens
-            flash(f"{from_user} does not have enough tokens!", "error")
+        # Check if the user has enough balance to transfer
+        if from_balance[0] < amount:
+            flash("Insufficient balance.", "error")
             return redirect(url_for('transfer'))
 
-        # Proceed with the transfer
-        if from_user_data[5] != 1:  # Admin is not included in this check
-            cursor.execute("UPDATE users SET tokens = tokens - ? WHERE username = ?", (amount, from_user))
-        cursor.execute("UPDATE users SET tokens = tokens + ? WHERE username = ?", (amount, to_user))
+        # Perform the transfer
+        cursor.execute("UPDATE users SET balance = balance - ? WHERE username = ?", (amount, from_user))
+        cursor.execute("UPDATE users SET balance = balance + ? WHERE username = ?", (amount, to_user))
         conn.commit()
+        flash("Transfer successful!", "success")
         conn.close()
 
-        flash(f"Successfully transferred {amount} tokens from {from_user} to {to_user}.", "success")
-        return redirect(url_for('home'))
-
-    return render_template('index.html', page='transfer', page_title="Token Transfer")
+    return render_template('transfer.html')
 
 
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
-    if session.get('username') != 'admin':
-        flash("You need to be an admin to access this page.", "error")
-        return redirect(url_for('home'))
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Fetch all users and their details
+    cursor.execute("SELECT id, username, balance, is_admin FROM users")
+    users = cursor.fetchall()
 
     if request.method == 'POST':
-        action = request.form.get('action')
-        username = request.form.get('username')
-        
-        conn = get_db()
-        cursor = conn.cursor()
+        action = request.form['action']
+        user_id = int(request.form['user_id'])
+        new_password = request.form['new_password']
+        reset_tokens = request.form['reset_tokens']
 
-        if action == 'reset_password':
-            new_password = request.form.get('new_password')
-            if not new_password:
-                flash("New password is required.", "error")
-                return redirect(url_for('admin'))
-
-            cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
+        if action == 'reset_password' and new_password:
+            cursor.execute("UPDATE users SET password = ? WHERE id = ?", (new_password, user_id))
             conn.commit()
-            flash(f"Password for {username} has been reset.", "success")
+            flash("Password reset successfully!", "success")
 
-        elif action == 'reset_tokens':
-            cursor.execute("UPDATE users SET tokens = 0 WHERE username = ?", (username,))
+        if action == 'reset_tokens' and reset_tokens:
+            cursor.execute("UPDATE users SET balance = 100 WHERE id = ?", (user_id,))
             conn.commit()
-            flash(f"Tokens for {username} have been reset.", "success")
+            flash("Tokens reset to 100 successfully!", "success")
 
-        elif action == 'delete_db':
-            confirm = request.form.get('confirm')
-            if confirm == 'yes':
-                os.remove(DATABASE)
-                flash("Database deleted successfully. You will need to recreate the app.", "info")
-                return redirect(url_for('home'))
+        if action == 'delete_user':
+            cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            conn.commit()
+            flash("User deleted successfully!", "success")
 
-        conn.close()
+    conn.close()
 
-    return render_template('index.html', page='admin', page_title="Admin Controls")
+    return render_template('admin.html', users=users)
 
 
 if __name__ == "__main__":
