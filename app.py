@@ -45,7 +45,6 @@ def before_first_request():
 
 @app.route('/')
 def home():
-    # Assuming the user is logged in and their username is stored in the session
     username = session.get('username')
     if username:
         conn = get_db()
@@ -54,7 +53,7 @@ def home():
         user = cursor.fetchone()
         conn.close()
         if user:
-            return render_template('index.html', page='home', page_title="Home", username=user[0], tokens=user[1])
+            return render_template('index.html', page='home', page_title="Home", username=user[0], tokens=user[1], is_admin=user[1] == 'admin')
         else:
             flash("User not found!", "error")
             return redirect(url_for('home'))
@@ -127,7 +126,7 @@ def logout():
 @app.route('/transfer', methods=['GET', 'POST'])
 def transfer():
     if request.method == 'POST':
-        from_user = request.form['from_user']
+        from_user = session.get('username')
         to_user = request.form['to_user']
         amount = int(request.form['amount'])
 
@@ -152,8 +151,8 @@ def transfer():
             flash(f"User {to_user} not found!", "error")
             return redirect(url_for('transfer'))
 
-        # Check if the sender has enough tokens
-        if from_user_data[4] < amount and from_user_data[5] != 1:  # Admin has infinite tokens (tokens field index is 4)
+        # Regular users can only transfer their own tokens
+        if from_user_data[4] < amount and from_user_data[5] != 1:  # Admin has infinite tokens
             flash(f"{from_user} does not have enough tokens!", "error")
             return redirect(url_for('transfer'))
 
@@ -168,6 +167,46 @@ def transfer():
         return redirect(url_for('home'))
 
     return render_template('index.html', page='transfer', page_title="Token Transfer")
+
+
+@app.route('/admin', methods=['GET', 'POST'])
+def admin():
+    if session.get('username') != 'admin':
+        flash("You need to be an admin to access this page.", "error")
+        return redirect(url_for('home'))
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+        username = request.form.get('username')
+        
+        conn = get_db()
+        cursor = conn.cursor()
+
+        if action == 'reset_password':
+            new_password = request.form.get('new_password')
+            if not new_password:
+                flash("New password is required.", "error")
+                return redirect(url_for('admin'))
+
+            cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
+            conn.commit()
+            flash(f"Password for {username} has been reset.", "success")
+
+        elif action == 'reset_tokens':
+            cursor.execute("UPDATE users SET tokens = 0 WHERE username = ?", (username,))
+            conn.commit()
+            flash(f"Tokens for {username} have been reset.", "success")
+
+        elif action == 'delete_db':
+            confirm = request.form.get('confirm')
+            if confirm == 'yes':
+                os.remove(DATABASE)
+                flash("Database deleted successfully. You will need to recreate the app.", "info")
+                return redirect(url_for('home'))
+
+        conn.close()
+
+    return render_template('index.html', page='admin', page_title="Admin Controls")
 
 
 if __name__ == "__main__":
