@@ -1,21 +1,45 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-gray-100">
+<html lang="en" class="h-full bg-black">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ page_title }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'off-white': '#f0f0f0',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        input, select {
+            background-color: transparent;
+            border: none;
+            border-bottom: 1px solid #f0f0f0;
+            color: #f0f0f0;
+            padding-bottom: 0.5rem;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-bottom: 2px solid #f0f0f0;
+        }
+    </style>
 </head>
-<body class="h-full flex flex-col items-center justify-center">
-    <div class="max-w-md w-full space-y-8 p-8 bg-white shadow-lg rounded-lg">
-        <h1 class="text-3xl font-bold text-center text-gray-900">{{ page_title }}</h1>
+<body class="h-full flex flex-col items-center justify-center bg-black text-off-white">
+    <div class="max-w-md w-full space-y-8 p-8">
+        <h1 class="text-3xl font-light text-center">{{ page_title }}</h1>
 
         <!-- Flash messages for notifications -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 <ul class="mt-3">
                     {% for category, message in messages %}
-                        <li class="px-4 py-2 rounded-md {% if category == 'error' %}bg-red-100 text-red-700{% else %}bg-green-100 text-green-700{% endif %}">{{ message }}</li>
+                        <li class="px-4 py-2 {% if category == 'error' %}text-red-400{% else %}text-green-400{% endif %}">{{ message }}</li>
                     {% endfor %}
                 </ul>
             {% endif %}
@@ -23,14 +47,14 @@
 
         {% if page == 'home' %}
         <!-- Home Page for Logged-in Users -->
-        <h2 class="mt-6 text-xl font-semibold text-gray-900">Welcome, {{ username }}!</h2>
-        <p class="mt-2 text-gray-600">Your balance: <span class="font-bold">{{ tokens }} tokens</span></p>
+        <h2 class="mt-6 text-xl font-light">Welcome, {{ username }}</h2>
+        <p class="mt-2">Your balance: <span class="font-bold">{{ tokens }} tokens</span></p>
 
         {% if is_admin %}
         <!-- Admin Panel Link for Admin -->
         <div class="mt-6">
-            <h3 class="text-lg font-medium text-gray-900">Admin Panel</h3>
-            <a href="{{ url_for('admin') }}" class="mt-2 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+            <h3 class="text-lg font-light">Admin Panel</h3>
+            <a href="{{ url_for('admin') }}" class="mt-2 inline-block border-b border-off-white text-off-white hover:text-gray-300 transition-colors duration-200">
                 Go to Admin Panel
             </a>
         </div>
@@ -38,19 +62,17 @@
 
         <!-- Transfer Tokens Form -->
         <form action="{{ url_for('transfer') }}" method="post" class="mt-8 space-y-6">
-            <h3 class="text-lg font-medium text-gray-900">Transfer Tokens</h3>
-            <div class="rounded-md shadow-sm -space-y-px">
+            <h3 class="text-lg font-light">Transfer Tokens</h3>
+            <div class="space-y-4">
                 <div>
-                    <label for="to_user" class="sr-only">To Username</label>
-                    <input type="text" name="to_user" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="To Username">
+                    <input type="text" name="to_user" required class="w-full bg-transparent" placeholder="To Username">
                 </div>
                 <div>
-                    <label for="amount" class="sr-only">Amount</label>
-                    <input type="number" name="amount" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="Amount">
+                    <input type="number" name="amount" required class="w-full bg-transparent" placeholder="Amount">
                 </div>
             </div>
             <div>
-                <button type="submit" class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                <button type="submit" class="w-full py-2 px-4 border border-off-white text-off-white hover:bg-off-white hover:text-black transition-colors duration-200">
                     Transfer
                 </button>
             </div>
@@ -58,71 +80,65 @@
 
         <!-- Logout Link -->
         <div class="mt-6 text-center">
-            <a href="{{ url_for('logout') }}" class="font-medium text-indigo-600 hover:text-indigo-500">Logout</a>
+            <a href="{{ url_for('logout') }}" class="text-off-white hover:text-gray-300 transition-colors duration-200">Logout</a>
         </div>
 
         {% elif page == 'signup' %}
         <!-- Sign-up Page -->
         <form action="{{ url_for('signup') }}" method="post" class="mt-8 space-y-6">
-            <h3 class="text-lg font-medium text-gray-900">Create a New Account</h3>
-            <div class="rounded-md shadow-sm -space-y-px">
+            <h3 class="text-lg font-light">Create a New Account</h3>
+            <div class="space-y-4">
                 <div>
-                    <label for="username" class="sr-only">Username</label>
-                    <input type="text" name="username" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="Username">
+                    <input type="text" name="username" required class="w-full bg-transparent" placeholder="Username">
                 </div>
                 <div>
-                    <label for="password" class="sr-only">Password</label>
-                    <input type="password" name="password" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="Password">
+                    <input type="password" name="password" required class="w-full bg-transparent" placeholder="Password">
                 </div>
             </div>
             <div>
-                <button type="submit" class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                <button type="submit" class="w-full py-2 px-4 border border-off-white text-off-white hover:bg-off-white hover:text-black transition-colors duration-200">
                     Sign Up
                 </button>
             </div>
         </form>
-        <p class="mt-2 text-center text-sm text-gray-600">
+        <p class="mt-2 text-center text-sm">
             Already have an account? 
-            <a href="{{ url_for('login') }}" class="font-medium text-indigo-600 hover:text-indigo-500">Login</a>
+            <a href="{{ url_for('login') }}" class="text-off-white hover:text-gray-300 transition-colors duration-200">Login</a>
         </p>
 
         {% elif page == 'login' %}
         <!-- Login Page -->
         <form action="{{ url_for('login') }}" method="post" class="mt-8 space-y-6">
-            <h3 class="text-lg font-medium text-gray-900">Login to Your Account</h3>
-            <div class="rounded-md shadow-sm -space-y-px">
+            <h3 class="text-lg font-light">Login to Your Account</h3>
+            <div class="space-y-4">
                 <div>
-                    <label for="username" class="sr-only">Username</label>
-                    <input type="text" name="username" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="Username">
+                    <input type="text" name="username" required class="w-full bg-transparent" placeholder="Username">
                 </div>
                 <div>
-                    <label for="password" class="sr-only">Password</label>
-                    <input type="password" name="password" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="Password">
+                    <input type="password" name="password" required class="w-full bg-transparent" placeholder="Password">
                 </div>
             </div>
             <div>
-                <button type="submit" class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                <button type="submit" class="w-full py-2 px-4 border border-off-white text-off-white hover:bg-off-white hover:text-black transition-colors duration-200">
                     Login
                 </button>
             </div>
         </form>
-        <p class="mt-2 text-center text-sm text-gray-600">
+        <p class="mt-2 text-center text-sm">
             Don't have an account? 
-            <a href="{{ url_for('signup') }}" class="font-medium text-indigo-600 hover:text-indigo-500">Sign Up</a>
+            <a href="{{ url_for('signup') }}" class="text-off-white hover:text-gray-300 transition-colors duration-200">Sign Up</a>
         </p>
 
         {% elif page == 'admin' %}
         <!-- Admin Page -->
         <form action="{{ url_for('admin') }}" method="post" class="mt-8 space-y-6">
-            <h3 class="text-lg font-medium text-gray-900">Admin Controls</h3>
-            <div class="rounded-md shadow-sm -space-y-px">
+            <h3 class="text-lg font-light">Admin Controls</h3>
+            <div class="space-y-4">
                 <div>
-                    <label for="username" class="sr-only">Enter Username</label>
-                    <input type="text" name="username" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="Enter Username">
+                    <input type="text" name="username" required class="w-full bg-transparent" placeholder="Enter Username">
                 </div>
                 <div>
-                    <label for="action" class="sr-only">Choose Action</label>
-                    <select name="action" required class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm">
+                    <select name="action" required class="w-full bg-transparent">
                         <option value="">Choose Action</option>
                         <option value="reset_password">Reset Password</option>
                         <option value="reset_tokens">Reset Tokens</option>
@@ -131,15 +147,13 @@
                 </div>
             </div>
             <div id="new_password_field" class="hidden">
-                <label for="new_password" class="sr-only">New Password</label>
-                <input type="password" name="new_password" class="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder="New Password">
+                <input type="password" name="new_password" class="w-full bg-transparent" placeholder="New Password">
             </div>
             <div id="confirm_field" class="hidden">
-                <label for="confirm" class="sr-only">Confirm Delete Database</label>
-                <input type="text" name="confirm" class="appearance-none rounded-md relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm" placeholder='Confirm Delete Database (type "yes")'>
+                <input type="text" name="confirm" class="w-full bg-transparent" placeholder='Confirm Delete Database (type "yes")'>
             </div>
             <div>
-                <button type="submit" class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                <button type="submit" class="w-full py-2 px-4 border border-off-white text-off-white hover:bg-off-white hover:text-black transition-colors duration-200">
                     Submit
                 </button>
             </div>
