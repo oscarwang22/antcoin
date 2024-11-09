@@ -1,32 +1,28 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from vercel import EdgeConfig
 import os
-import vercel_kv
 
-# Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default_secret_key')
 
-# Initialize Vercel KV client
-kv = vercel_kv.Client(token=os.getenv('VERCEL_KV_TOKEN'))
+# Initialize Vercel EdgeConfig
+config = EdgeConfig(token=os.getenv('VERCEL_EDGE_CONFIG_TOKEN'))  # Set your token in the environment variables
 
-# Helper functions for user data operations
-def get_user(username):
-    user_data = kv.get(f"user:{username}")
-    return user_data
+# Helper function to interact with the Vercel Edge Config
+def get_user_data(username):
+    user_data = config.get(username)
+    return user_data if user_data else None
 
-def set_user(user_data):
-    kv.set(f"user:{user_data['username']}", user_data)
-
-def delete_user(username):
-    kv.delete(f"user:{username}")
+def set_user_data(username, data):
+    config.set(username, data)
 
 @app.route('/')
 def home():
     username = session.get('username')
     if username:
-        user = get_user(username)
-        if user:
-            return render_template('index.html', page='home', page_title="Home", username=user['username'], tokens=user['tokens'], is_admin=user['is_admin'])
+        user_data = get_user_data(username)
+        if user_data:
+            return render_template('index.html', page='home', page_title="Home", username=user_data['username'], tokens=user_data['tokens'], is_admin=user_data['is_admin'])
         else:
             flash("User not found!", "error")
             return redirect(url_for('login'))
@@ -43,19 +39,17 @@ def signup():
             flash("Username and password are required!", "error")
             return redirect(url_for('signup'))
 
-        if get_user(username):
-            flash("Username already taken!", "error")
-            return redirect(url_for('signup'))
-
-        # Create new user
-        new_user = {
-            'username': username,
-            'password': password,
-            'balance': 100,
-            'tokens': 0,
-            'is_admin': False
+        # Create user data structure
+        new_user_data = {
+            "username": username,
+            "password": password,
+            "balance": 100,
+            "tokens": 0,
+            "is_admin": False
         }
-        set_user(new_user)
+
+        # Save to Edge Config
+        set_user_data(username, new_user_data)
         flash("Account created successfully!", "success")
         return redirect(url_for('home'))
 
@@ -67,8 +61,8 @@ def login():
         username = request.form['username']
         password = request.form['password']
 
-        user = get_user(username)
-        if user and user['password'] == password:
+        user_data = get_user_data(username)
+        if user_data and user_data['password'] == password:
             session['username'] = username  # Store username in session
             flash("Login successful!", "success")
             return redirect(url_for('home'))
@@ -95,22 +89,24 @@ def transfer():
             flash("All fields are required, and the amount must be greater than 0!", "error")
             return redirect(url_for('transfer'))
 
-        from_user = get_user(from_user_name)
-        to_user = get_user(to_user_name)
+        from_user_data = get_user_data(from_user_name)
+        to_user_data = get_user_data(to_user_name)
 
-        if not from_user or not to_user:
+        if not from_user_data or not to_user_data:
             flash("One or both users not found!", "error")
             return redirect(url_for('transfer'))
 
-        if from_user['tokens'] < amount and not from_user['is_admin']:
+        if from_user_data['tokens'] < amount and not from_user_data['is_admin']:
             flash(f"{from_user_name} does not have enough tokens!", "error")
             return redirect(url_for('transfer'))
 
-        # Update token balances
-        from_user['tokens'] -= amount
-        to_user['tokens'] += amount
-        set_user(from_user)
-        set_user(to_user)
+        # Update tokens for both users
+        from_user_data['tokens'] -= amount
+        to_user_data['tokens'] += amount
+
+        # Save updated data back to Edge Config
+        set_user_data(from_user_name, from_user_data)
+        set_user_data(to_user_name, to_user_data)
 
         flash(f"Successfully transferred {amount} tokens from {from_user_name} to {to_user_name}.", "success")
         return redirect(url_for('home'))
@@ -127,47 +123,40 @@ def admin():
         action = request.form.get('action')
         username = request.form.get('username')
         
-        user = get_user(username)
+        user_data = get_user_data(username)
 
         if action == 'reset_password':
             new_password = request.form.get('new_password')
-            if user and new_password:
-                user['password'] = new_password
-                set_user(user)
+            if user_data and new_password:
+                user_data['password'] = new_password
+                set_user_data(username, user_data)
                 flash(f"Password for {username} has been reset.", "success")
             else:
                 flash(f"User {username} not found or password is empty.", "error")
 
         elif action == 'reset_tokens':
-            if user:
-                user['tokens'] = 0
-                set_user(user)
+            if user_data:
+                user_data['tokens'] = 0
+                set_user_data(username, user_data)
                 flash(f"Tokens for {username} have been reset.", "success")
             else:
                 flash(f"User {username} not found.", "error")
 
-        elif action == 'delete_db':
-            confirm = request.form.get('confirm')
-            if confirm == 'yes':
-                kv.clear()
-                flash("All user data deleted successfully.", "info")
-                return redirect(url_for('home'))
-
     return render_template('index.html', page='admin', page_title="Admin Controls")
 
 @app.route('/api/user_data', methods=['GET'])
-def get_user_data():
+def get_user_data_api():
     username = session.get('username')
     if not username:
         return jsonify({"error": "User not logged in"}), 403
     
-    user = get_user(username)
-    if user:
+    user_data = get_user_data(username)
+    if user_data:
         return jsonify({
             "username": username,
-            "tokens": user['tokens'],
-            "balance": user['balance'],
-            "is_admin": user['is_admin']
+            "tokens": user_data['tokens'],
+            "balance": user_data['balance'],
+            "is_admin": user_data['is_admin']
         })
     return jsonify({"error": "User not found"}), 404
 
