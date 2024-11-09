@@ -3,4 +3,5 @@ Flask-SQLAlchemy
 psycopg2-binary
 pg8000==1.29.0
 werkzeug==2.2.2
+vercel
 gunicorn
