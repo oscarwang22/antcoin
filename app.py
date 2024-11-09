@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 import os
 import json
 
@@ -186,6 +186,38 @@ def admin():
         save_users(users)
 
     return render_template('index.html', page='admin', page_title="Admin Controls")
+
+
+# Route to export user data as JSON
+@app.route('/export_data', methods=['GET'])
+def export_data():
+    users = load_users()
+    # Exporting the user data as a JSON file for download
+    response = jsonify(users)
+    response.headers['Content-Disposition'] = 'attachment; filename=users_data.json'
+    return response
+
+
+# Route to load existing JSON data into the app
+@app.route('/load_data', methods=['POST'])
+def load_data():
+    if 'file' not in request.files:
+        flash("No file part", "error")
+        return redirect(url_for('home'))
+
+    file = request.files['file']
+    if file.filename == '':
+        flash("No selected file", "error")
+        return redirect(url_for('home'))
+
+    try:
+        data = json.load(file)
+        save_users(data)
+        flash("User data loaded successfully.", "success")
+    except Exception as e:
+        flash(f"Error loading file: {e}", "error")
+
+    return redirect(url_for('home'))
 
 
 if __name__ == "__main__":
