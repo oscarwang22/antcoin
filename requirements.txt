@@ -5,3 +5,4 @@ pg8000==1.29.0
 werkzeug==2.2.2
 vercel
 gunicorn
+pymongo
