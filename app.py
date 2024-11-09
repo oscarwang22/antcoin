@@ -74,7 +74,8 @@ def login():
         password = request.form['password']
 
         user_data = get_user_data(username)
-        if user_data and user_data['password'] == password:
+        # Check that user_data exists and contains the 'password' key
+        if user_data and user_data.get('password') == password:
             session['username'] = username  # Store username in session
             flash("Login successful!", "success")
             return redirect(url_for('home'))
