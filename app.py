@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 import os
 import json
 
@@ -113,7 +113,7 @@ def transfer():
         to_user = request.form['to_user']
         amount = int(request.form['amount'])
 
-        if not from_user or not to_user or amount <= 0:
+        if not from_user or not to_user or amount == 0:
             flash("All fields are required, and the amount must be greater than 0!", "error")
             return redirect(url_for('transfer'))
 
@@ -131,10 +131,15 @@ def transfer():
             flash(f"{from_user} does not have enough tokens!", "error")
             return redirect(url_for('transfer'))
 
-        # Proceed with the transfer
-        if not from_user_data['is_admin']:  # Admin is not included in this check
+        # Allow negative transfers (deduct tokens from users) for admins
+        if from_user_data['is_admin'] and amount < 0:
+            # Admin can deduct tokens (negative transfer)
+            from_user_data['tokens'] += amount  # Amount is negative, so it deducts
+            to_user_data['tokens'] -= amount    # Same negative value will be added to the recipient
+        else:
+            # Proceed with a positive transfer (regular users and admins transferring positive tokens)
             from_user_data['tokens'] -= amount
-        to_user_data['tokens'] += amount
+            to_user_data['tokens'] += amount
 
         save_users(users)
         flash(f"Successfully transferred {amount} tokens from {from_user} to {to_user}.", "success")
@@ -187,38 +192,32 @@ def admin():
 
     return render_template('index.html', page='admin', page_title="Admin Controls")
 
-
-# Route to export user data as JSON
-@app.route('/export_data', methods=['GET'])
-def export_data():
+# New route to get user data as JSON
+@app.route('/api/user_data', methods=['GET'])
+def get_user_data():
+    username = session.get('username')
+    if not username:
+        return json.dumps({"error": "User not logged in"}), 403
+    
     users = load_users()
-    # Exporting the user data as a JSON file for download
-    response = jsonify(users)
-    response.headers['Content-Disposition'] = 'attachment; filename=users_data.json'
-    return response
+    user = users.get(username)
+    
+    if user:
+        return json.dumps({
+            "username": username,
+            "tokens": user['tokens'],
+            "balance": user['balance'],
+            "is_admin": user['is_admin']
+        })
+    return json.dumps({"error": "User not found"}), 404
 
-
-# Route to load existing JSON data into the app
-@app.route('/load_data', methods=['POST'])
-def load_data():
-    if 'file' not in request.files:
-        flash("No file part", "error")
-        return redirect(url_for('home'))
-
-    file = request.files['file']
-    if file.filename == '':
-        flash("No selected file", "error")
-        return redirect(url_for('home'))
-
-    try:
-        data = json.load(file)
-        save_users(data)
-        flash("User data loaded successfully.", "success")
-    except Exception as e:
-        flash(f"Error loading file: {e}", "error")
-
-    return redirect(url_for('home'))
-
+# New route to load the existing JSON file for use in the app
+@app.route('/api/load_users', methods=['GET'])
+def load_existing_json():
+    users = load_users()
+    if users:
+        return json.dumps({"message": "Users data loaded successfully", "data": users})
+    return json.dumps({"error": "No user data found"}), 404
 
 if __name__ == "__main__":
     # Initialize users data before starting the application
