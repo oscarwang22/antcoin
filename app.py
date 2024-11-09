@@ -7,12 +7,10 @@ app.secret_key = 'your_secret_key'
 
 DATABASE = 'users.db'  # SQLite database file
 
-
 # Function to get a database connection
 def get_db():
     conn = sqlite3.connect(DATABASE)
     return conn
-
 
 # Create users table if it doesn't exist
 def init_db():
@@ -41,6 +39,9 @@ def init_db():
 
         conn.close()
 
+@app.before_first_request
+def before_first_request():
+    init_db()  # Ensure database and tables are created before the first request is handled
 
 @app.route('/')
 def home():
