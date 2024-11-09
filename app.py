@@ -1,20 +1,29 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
-from vercel import EdgeConfig
 import os
+import requests
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default_secret_key')
 
-# Initialize Vercel EdgeConfig
-config = EdgeConfig(token=os.getenv('VERCEL_EDGE_CONFIG_TOKEN'))  # Set your token in the environment variables
+# Your Edge Config URL and token
+EDGE_CONFIG_URL = "https://edge-config.vercel.com/ecfg_ojxjwldbpnkz3cceo5tuhk2z5xxm"
+VERCEL_EDGE_CONFIG_TOKEN = "7ef010af-ecce-467a-8aa7-dd0d283e56d3"
 
-# Helper function to interact with the Vercel Edge Config
+# Helper functions for interacting with Edge Config via HTTP
 def get_user_data(username):
-    user_data = config.get(username)
-    return user_data if user_data else None
+    # Add the token as a query parameter in the URL
+    response = requests.get(f"{EDGE_CONFIG_URL}?token={VERCEL_EDGE_CONFIG_TOKEN}&key={username}")
+    if response.status_code == 200:
+        return response.json()  # Return user data if found
+    return None
 
 def set_user_data(username, data):
-    config.set(username, data)
+    # Add the token as a query parameter in the URL
+    response = requests.put(
+        f"{EDGE_CONFIG_URL}?token={VERCEL_EDGE_CONFIG_TOKEN}&key={username}",
+        json=data
+    )
+    return response.status_code == 200  # Return True if successful
 
 @app.route('/')
 def home():
@@ -49,9 +58,12 @@ def signup():
         }
 
         # Save to Edge Config
-        set_user_data(username, new_user_data)
-        flash("Account created successfully!", "success")
-        return redirect(url_for('home'))
+        if set_user_data(username, new_user_data):
+            flash("Account created successfully!", "success")
+            return redirect(url_for('home'))
+        else:
+            flash("Failed to create account.", "error")
+            return redirect(url_for('signup'))
 
     return render_template('index.html', page='signup', page_title="Sign Up")
 
