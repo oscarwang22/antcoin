@@ -1,54 +1,50 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
 import os
-import json
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default_secret_key')
 
-USERS_FILE = '/tmp/users.json'  # Path to the JSON file
+# Configure the database connection using Vercel Postgres URL
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Function to load users from the JSON file
-def load_users():
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+# Initialize the database
+db = SQLAlchemy(app)
 
-# Function to save users to the JSON file
-def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=4)
+# User model for the Postgres database
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(80), nullable=False)
+    balance = db.Column(db.Integer, default=100)
+    tokens = db.Column(db.Integer, default=0)
+    is_admin = db.Column(db.Boolean, default=False)
 
-# Initialize the user data (creates an admin user if file doesn't exist)
-def init_users():
-    if not os.path.exists(USERS_FILE):
-        users = {}
-        users['admin'] = {
-            'password': 'adminpassword',
-            'balance': 100,
-            'tokens': 99999999,
-            'is_admin': True
-        }
-        save_users(users)
-
+# Initialize database and create the admin user
 @app.before_first_request
-def before_first_request():
-    init_users()  # Ensure users data is initialized before the first request
+def init_db():
+    db.create_all()
+    # Create an admin user if none exists
+    if not User.query.filter_by(username='admin').first():
+        admin_user = User(username='admin', password='adminpassword', balance=100, tokens=99999999, is_admin=True)
+        db.session.add(admin_user)
+        db.session.commit()
 
 @app.route('/')
 def home():
     username = session.get('username')
     if username:
-        users = load_users()
-        user = users.get(username)
+        user = User.query.filter_by(username=username).first()
         if user:
-            return render_template('index.html', page='home', page_title="Home", username=user['password'], tokens=user['tokens'], is_admin=user['is_admin'])
+            return render_template('index.html', page='home', page_title="Home", username=user.username, tokens=user.tokens, is_admin=user.is_admin)
         else:
             flash("User not found!", "error")
-            return redirect(url_for('home'))
+            return redirect(url_for('login'))
     else:
         return redirect(url_for('login'))
-
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
@@ -60,20 +56,18 @@ def signup():
             flash("Username and password are required!", "error")
             return redirect(url_for('signup'))
 
-        users = load_users()
-        if username in users:
+        new_user = User(username=username, password=password)
+        try:
+            db.session.add(new_user)
+            db.session.commit()
+            flash("Account created successfully!", "success")
+            return redirect(url_for('home'))
+        except IntegrityError:
+            db.session.rollback()
             flash("Username already taken!", "error")
             return redirect(url_for('signup'))
 
-        # Add the new user to the users dictionary
-        users[username] = {'password': password, 'balance': 100, 'tokens': 0, 'is_admin': False}
-        save_users(users)
-        
-        flash("Account created successfully!", "success")
-        return redirect(url_for('home'))
-
     return render_template('index.html', page='signup', page_title="Sign Up")
-
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -81,14 +75,8 @@ def login():
         username = request.form['username']
         password = request.form['password']
 
-        if not username or not password:
-            flash("Username and password are required!", "error")
-            return redirect(url_for('login'))
-
-        users = load_users()
-        user = users.get(username)
-
-        if user and user['password'] == password:
+        user = User.query.filter_by(username=username, password=password).first()
+        if user:
             session['username'] = username  # Store username in session
             flash("Login successful!", "success")
             return redirect(url_for('home'))
@@ -98,55 +86,42 @@ def login():
 
     return render_template('index.html', page='login', page_title="Login")
 
-
 @app.route('/logout')
 def logout():
     session.pop('username', None)
     flash("You have been logged out.", "info")
     return redirect(url_for('home'))
 
-
 @app.route('/transfer', methods=['GET', 'POST'])
 def transfer():
     if request.method == 'POST':
-        from_user = session.get('username')
-        to_user = request.form['to_user']
+        from_user_name = session.get('username')
+        to_user_name = request.form['to_user']
         amount = int(request.form['amount'])
 
-        if not from_user or not to_user or amount == 0:
+        if not from_user_name or not to_user_name or amount <= 0:
             flash("All fields are required, and the amount must be greater than 0!", "error")
             return redirect(url_for('transfer'))
 
-        users = load_users()
+        from_user = User.query.filter_by(username=from_user_name).first()
+        to_user = User.query.filter_by(username=to_user_name).first()
 
-        if from_user not in users or to_user not in users:
+        if not from_user or not to_user:
             flash("One or both users not found!", "error")
             return redirect(url_for('transfer'))
 
-        from_user_data = users[from_user]
-        to_user_data = users[to_user]
-
-        # Regular users can only transfer their own tokens
-        if from_user_data['tokens'] < amount and not from_user_data['is_admin']:  # Admin has infinite tokens
-            flash(f"{from_user} does not have enough tokens!", "error")
+        if from_user.tokens < amount and not from_user.is_admin:
+            flash(f"{from_user_name} does not have enough tokens!", "error")
             return redirect(url_for('transfer'))
 
-        # Allow negative transfers (deduct tokens from users) for admins
-        if from_user_data['is_admin'] and amount < 0:
-            # Admin can deduct tokens (negative transfer)
-            from_user_data['tokens'] += amount  # Amount is negative, so it deducts
-            to_user_data['tokens'] -= amount    # Same negative value will be added to the recipient
-        else:
-            # Proceed with a positive transfer (regular users and admins transferring positive tokens)
-            from_user_data['tokens'] -= amount
-            to_user_data['tokens'] += amount
+        from_user.tokens -= amount
+        to_user.tokens += amount
+        db.session.commit()
 
-        save_users(users)
-        flash(f"Successfully transferred {amount} tokens from {from_user} to {to_user}.", "success")
+        flash(f"Successfully transferred {amount} tokens from {from_user_name} to {to_user_name}.", "success")
         return redirect(url_for('home'))
 
     return render_template('index.html', page='transfer', page_title="Token Transfer")
-
 
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
@@ -158,25 +133,21 @@ def admin():
         action = request.form.get('action')
         username = request.form.get('username')
         
-        users = load_users()
+        user = User.query.filter_by(username=username).first()
 
         if action == 'reset_password':
             new_password = request.form.get('new_password')
-            if not new_password:
-                flash("New password is required.", "error")
-                return redirect(url_for('admin'))
-
-            if username in users:
-                users[username]['password'] = new_password
-                save_users(users)
+            if user and new_password:
+                user.password = new_password
+                db.session.commit()
                 flash(f"Password for {username} has been reset.", "success")
             else:
-                flash(f"User {username} not found.", "error")
+                flash(f"User {username} not found or password is empty.", "error")
 
         elif action == 'reset_tokens':
-            if username in users:
-                users[username]['tokens'] = 0
-                save_users(users)
+            if user:
+                user.tokens = 0
+                db.session.commit()
                 flash(f"Tokens for {username} have been reset.", "success")
             else:
                 flash(f"User {username} not found.", "error")
@@ -184,42 +155,29 @@ def admin():
         elif action == 'delete_db':
             confirm = request.form.get('confirm')
             if confirm == 'yes':
-                os.remove(USERS_FILE)
-                flash("User data deleted successfully. You will need to recreate the app.", "info")
+                User.query.delete()
+                db.session.commit()
+                flash("User data deleted successfully.", "info")
                 return redirect(url_for('home'))
-
-        save_users(users)
 
     return render_template('index.html', page='admin', page_title="Admin Controls")
 
-# New route to get user data as JSON
 @app.route('/api/user_data', methods=['GET'])
 def get_user_data():
     username = session.get('username')
     if not username:
-        return json.dumps({"error": "User not logged in"}), 403
+        return jsonify({"error": "User not logged in"}), 403
     
-    users = load_users()
-    user = users.get(username)
-    
+    user = User.query.filter_by(username=username).first()
     if user:
-        return json.dumps({
+        return jsonify({
             "username": username,
-            "tokens": user['tokens'],
-            "balance": user['balance'],
-            "is_admin": user['is_admin']
+            "tokens": user.tokens,
+            "balance": user.balance,
+            "is_admin": user.is_admin
         })
-    return json.dumps({"error": "User not found"}), 404
-
-# New route to load the existing JSON file for use in the app
-@app.route('/api/load_users', methods=['GET'])
-def load_existing_json():
-    users = load_users()
-    if users:
-        return json.dumps({"message": "Users data loaded successfully", "data": users})
-    return json.dumps({"error": "No user data found"}), 404
+    return jsonify({"error": "User not found"}), 404
 
 if __name__ == "__main__":
-    # Initialize users data before starting the application
-    init_users()
+    init_db()
     app.run(debug=True)
