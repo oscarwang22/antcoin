@@ -1,29 +1,25 @@
 import os
-import requests
+import pymongo
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default_secret_key')
 
-# Your Edge Config URL and token
-EDGE_CONFIG_URL = "https://edge-config.vercel.com/ecfg_ojxjwldbpnkz3cceo5tuhk2z5xxm"
-VERCEL_EDGE_CONFIG_TOKEN = "7ef010af-ecce-467a-8aa7-dd0d283e56d3"
+# MongoDB setup
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+client = pymongo.MongoClient(MONGO_URI)
+db = client['your_database_name']  # Replace with your database name
+users_collection = db['users']     # Collection to store user data
 
-# Helper functions for interacting with Edge Config via HTTP
+# Helper functions for interacting with MongoDB
 def get_user_data(username):
-    # Add the token as a query parameter in the URL
-    response = requests.get(f"{EDGE_CONFIG_URL}?token={VERCEL_EDGE_CONFIG_TOKEN}&key={username}")
-    if response.status_code == 200:
-        return response.json()  # Return user data if found
-    return None
+    # Find user by username
+    return users_collection.find_one({"username": username})
 
 def set_user_data(username, data):
-    # Add the token as a query parameter in the URL
-    response = requests.put(
-        f"{EDGE_CONFIG_URL}?token={VERCEL_EDGE_CONFIG_TOKEN}&key={username}",
-        json=data
-    )
-    return response.status_code == 200  # Return True if successful
+    # Upsert (insert if not found, update if found) user data
+    result = users_collection.update_one({"username": username}, {"$set": data}, upsert=True)
+    return result.modified_count > 0 or result.upserted_id is not None
 
 @app.route('/')
 def home():
@@ -31,7 +27,14 @@ def home():
     if username:
         user_data = get_user_data(username)
         if user_data:
-            return render_template('index.html', page='home', page_title="Home", username=user_data['username'], tokens=user_data['tokens'], is_admin=user_data['is_admin'])
+            return render_template(
+                'index.html',
+                page='home',
+                page_title="Home",
+                username=user_data['username'],
+                tokens=user_data.get('tokens', 0),
+                is_admin=user_data.get('is_admin', False)
+            )
         else:
             flash("User not found!", "error")
             return redirect(url_for('login'))
@@ -54,10 +57,10 @@ def signup():
             "password": password,
             "balance": 100,
             "tokens": 0,
-            "is_admin": False
+            "is_admin": False  # Regular users are not admins by default
         }
 
-        # Save to Edge Config
+        # Save to MongoDB
         if set_user_data(username, new_user_data):
             flash("Account created successfully!", "success")
             return redirect(url_for('home'))
@@ -74,7 +77,7 @@ def login():
         password = request.form['password']
 
         user_data = get_user_data(username)
-        # Check that user_data exists and contains the 'password' key
+        # Check that user_data exists and contains the correct password
         if user_data and user_data.get('password') == password:
             session['username'] = username  # Store username in session
             flash("Login successful!", "success")
@@ -117,7 +120,7 @@ def transfer():
         from_user_data['tokens'] -= amount
         to_user_data['tokens'] += amount
 
-        # Save updated data back to Edge Config
+        # Save updated data back to MongoDB
         set_user_data(from_user_name, from_user_data)
         set_user_data(to_user_name, to_user_data)
 
@@ -128,7 +131,10 @@ def transfer():
 
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
-    if session.get('username') != 'admin':
+    username = session.get('username')
+    user_data = get_user_data(username)
+    
+    if not user_data or not user_data.get('is_admin'):
         flash("You need to be an admin to access this page.", "error")
         return redirect(url_for('home'))
 
@@ -167,9 +173,9 @@ def get_user_data_api():
     if user_data:
         return jsonify({
             "username": username,
-            "tokens": user_data['tokens'],
-            "balance": user_data['balance'],
-            "is_admin": user_data['is_admin']
+            "tokens": user_data.get('tokens', 0),
+            "balance": user_data.get('balance', 100),
+            "is_admin": user_data.get('is_admin', False)
         })
     return jsonify({"error": "User not found"}), 404
 
