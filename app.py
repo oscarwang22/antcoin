@@ -1,48 +1,60 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
-import os
 import json
+from flask import Flask, render_template, request, redirect, url_for, flash, session
+import sqlite3
+import os
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
 
-USERS_FILE = '/tmp/users.json'  # Path to the JSON file
+DATABASE = 'users.db'  # SQLite database file
 
-# Function to load users from the JSON file
-def load_users():
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+# Function to get a database connection
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    return conn
 
-# Function to save users to the JSON file
-def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=4)
+# Create users table if it doesn't exist
+def init_db():
+    if not os.path.exists(DATABASE):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                balance INTEGER NOT NULL DEFAULT 100,
+                tokens INTEGER NOT NULL DEFAULT 0,
+                is_admin BOOLEAN NOT NULL DEFAULT 0
+            )
+        ''')
+        conn.commit()
 
-# Initialize the user data (creates an admin user if file doesn't exist)
-def init_users():
-    if not os.path.exists(USERS_FILE):
-        users = {}
-        users['admin'] = {
-            'password': 'adminpassword',
-            'balance': 100,
-            'tokens': 99999999,
-            'is_admin': True
-        }
-        save_users(users)
+        # Set the first user as admin
+        cursor.execute('SELECT COUNT(*) FROM users')
+        user_count = cursor.fetchone()[0]
+        if user_count == 0:
+            cursor.execute("INSERT INTO users (username, password, balance, tokens, is_admin) VALUES (?, ?, ?, ?, ?)",
+                           ('admin', 'adminpassword', 100, 99999999, 1))  # Create an admin user with infinite tokens
+            conn.commit()
+
+        conn.close()
 
 @app.before_first_request
 def before_first_request():
-    init_users()  # Ensure users data is initialized before the first request
+    init_db()  # Ensure database and tables are created before the first request is handled
 
 @app.route('/')
 def home():
     username = session.get('username')
     if username:
-        users = load_users()
-        user = users.get(username)
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, tokens FROM users WHERE username = ?", (username,))
+        user = cursor.fetchone()
+        conn.close()
         if user:
-            return render_template('index.html', page='home', page_title="Home", username=user['password'], tokens=user['tokens'], is_admin=user['is_admin'])
+            return render_template('index.html', page='home', page_title="Home", username=user[0], tokens=user[1], is_admin=user[1] == 'admin')
         else:
             flash("User not found!", "error")
             return redirect(url_for('home'))
@@ -60,17 +72,20 @@ def signup():
             flash("Username and password are required!", "error")
             return redirect(url_for('signup'))
 
-        users = load_users()
-        if username in users:
-            flash("Username already taken!", "error")
-            return redirect(url_for('signup'))
-
-        # Add the new user to the users dictionary
-        users[username] = {'password': password, 'balance': 100, 'tokens': 0, 'is_admin': False}
-        save_users(users)
-        
-        flash("Account created successfully!", "success")
-        return redirect(url_for('home'))
+        # Insert the new user into the database
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("INSERT INTO users (username, password, balance, tokens) VALUES (?, ?, ?, ?)",
+                           (username, password, 100, 0))  # Initial balance 100, no tokens
+            conn.commit()
+            flash("Account created successfully!", "success")
+            return redirect(url_for('home'))
+        except sqlite3.Error as e:
+            flash(f"Error: {e}", "error")
+            conn.rollback()
+        finally:
+            conn.close()
 
     return render_template('index.html', page='signup', page_title="Sign Up")
 
@@ -85,10 +100,13 @@ def login():
             flash("Username and password are required!", "error")
             return redirect(url_for('login'))
 
-        users = load_users()
-        user = users.get(username)
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+        user = cursor.fetchone()
+        conn.close()
 
-        if user and user['password'] == password:
+        if user:
             session['username'] = username  # Store username in session
             flash("Login successful!", "success")
             return redirect(url_for('home'))
@@ -117,26 +135,35 @@ def transfer():
             flash("All fields are required, and the amount must be greater than 0!", "error")
             return redirect(url_for('transfer'))
 
-        users = load_users()
+        conn = get_db()
+        cursor = conn.cursor()
 
-        if from_user not in users or to_user not in users:
-            flash("One or both users not found!", "error")
+        # Get the users' token balances
+        cursor.execute("SELECT * FROM users WHERE username = ?", (from_user,))
+        from_user_data = cursor.fetchone()
+        cursor.execute("SELECT * FROM users WHERE username = ?", (to_user,))
+        to_user_data = cursor.fetchone()
+
+        if not from_user_data:
+            flash(f"User {from_user} not found!", "error")
+            return redirect(url_for('transfer'))
+        
+        if not to_user_data:
+            flash(f"User {to_user} not found!", "error")
             return redirect(url_for('transfer'))
 
-        from_user_data = users[from_user]
-        to_user_data = users[to_user]
-
         # Regular users can only transfer their own tokens
-        if from_user_data['tokens'] < amount and not from_user_data['is_admin']:  # Admin has infinite tokens
+        if from_user_data[4] < amount and from_user_data[5] != 1:  # Admin has infinite tokens
             flash(f"{from_user} does not have enough tokens!", "error")
             return redirect(url_for('transfer'))
 
         # Proceed with the transfer
-        if not from_user_data['is_admin']:  # Admin is not included in this check
-            from_user_data['tokens'] -= amount
-        to_user_data['tokens'] += amount
+        if from_user_data[5] != 1:  # Admin is not included in this check
+            cursor.execute("UPDATE users SET tokens = tokens - ? WHERE username = ?", (amount, from_user))
+        cursor.execute("UPDATE users SET tokens = tokens + ? WHERE username = ?", (amount, to_user))
+        conn.commit()
+        conn.close()
 
-        save_users(users)
         flash(f"Successfully transferred {amount} tokens from {from_user} to {to_user}.", "success")
         return redirect(url_for('home'))
 
@@ -153,7 +180,8 @@ def admin():
         action = request.form.get('action')
         username = request.form.get('username')
         
-        users = load_users()
+        conn = get_db()
+        cursor = conn.cursor()
 
         if action == 'reset_password':
             new_password = request.form.get('new_password')
@@ -161,34 +189,52 @@ def admin():
                 flash("New password is required.", "error")
                 return redirect(url_for('admin'))
 
-            if username in users:
-                users[username]['password'] = new_password
-                save_users(users)
-                flash(f"Password for {username} has been reset.", "success")
-            else:
-                flash(f"User {username} not found.", "error")
+            cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_password, username))
+            conn.commit()
+            flash(f"Password for {username} has been reset.", "success")
 
         elif action == 'reset_tokens':
-            if username in users:
-                users[username]['tokens'] = 0
-                save_users(users)
-                flash(f"Tokens for {username} have been reset.", "success")
-            else:
-                flash(f"User {username} not found.", "error")
+            cursor.execute("UPDATE users SET tokens = 0 WHERE username = ?", (username,))
+            conn.commit()
+            flash(f"Tokens for {username} have been reset.", "success")
 
         elif action == 'delete_db':
             confirm = request.form.get('confirm')
             if confirm == 'yes':
-                os.remove(USERS_FILE)
-                flash("User data deleted successfully. You will need to recreate the app.", "info")
+                os.remove(DATABASE)
+                flash("Database deleted successfully. You will need to recreate the app.", "info")
                 return redirect(url_for('home'))
 
-        save_users(users)
+        conn.close()
 
     return render_template('index.html', page='admin', page_title="Admin Controls")
 
 
+@app.route('/export_json', methods=['GET'])
+def export_json():
+    if session.get('username') != 'admin':
+        flash("You need to be an admin to access this page.", "error")
+        return redirect(url_for('home'))
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, tokens FROM users")
+    users = cursor.fetchall()
+    conn.close()
+
+    # Prepare data in dictionary form
+    user_data = [{"username": user[0], "tokens": user[1]} for user in users]
+
+    # Save the data to /tmp/users.json
+    export_path = '/tmp/users.json'
+    with open(export_path, 'w') as f:
+        json.dump(user_data, f)
+
+    flash(f"User data exported successfully to {export_path}.", "success")
+    return redirect(url_for('admin'))
+
+
 if __name__ == "__main__":
-    # Initialize users data before starting the application
-    init_users()
+    # Initialize the database before starting the application
+    init_db()
     app.run(debug=True)
