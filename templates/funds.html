@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Funds</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Your Funds</h1>
+        <p>Current Balance: {{ funds }}</p>
+        <div class="links">
+            <a href="{{ url_for('transfer') }}">Transfer Funds</a> | 
+            <a href="{{ url_for('logout') }}">Log Out</a>
+        </div>
+    </div>
+</body>
+</html>
