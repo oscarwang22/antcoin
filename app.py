@@ -90,6 +90,33 @@ def login():
     return render_template('login.html')
 
 
+# New Sign-In route
+@app.route('/signin', methods=['GET', 'POST'])
+def signin():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        if not username or not password:
+            flash("Username and password are required!", "error")
+            return redirect(url_for('signin'))
+
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+        user = cursor.fetchone()
+        conn.close()
+
+        if user:
+            flash("Sign-In successful!", "success")
+            return redirect(url_for('home'))
+        else:
+            flash("Invalid username or password!", "error")
+            return redirect(url_for('signin'))
+
+    return render_template('signin.html')
+
+
 if __name__ == "__main__":
     # Initialize the database before starting the application
     init_db()
