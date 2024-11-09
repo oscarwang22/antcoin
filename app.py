@@ -1,104 +1,96 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, flash
 import sqlite3
+import os
 
 app = Flask(__name__)
-app.secret_key = 'qwertyuioplkjhgfdsssaqazplm'
+app.secret_key = 'your_secret_key'
 
-# Database setup (SQLite)
+DATABASE = 'users.db'  # SQLite database file
+
+
+# Function to get a database connection
 def get_db():
-    conn = sqlite3.connect('crypto_app.db')
+    conn = sqlite3.connect(DATABASE)
     return conn
 
-# Check if user is logged in
-def is_logged_in():
-    return 'username' in session
 
-# Home page
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-# Sign Up
-@app.route('/signup', methods=['GET'])
-def signup():
-    username = request.args.get('username')
-    password = request.args.get('password')
-    
-    if username and password:
+# Create users table if it doesn't exist
+def init_db():
+    if not os.path.exists(DATABASE):
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO users (username, password, balance) VALUES (?, ?, ?)", (username, password, 100))  # Initial balance 100
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                balance INTEGER NOT NULL DEFAULT 100
+            )
+        ''')
         conn.commit()
         conn.close()
-        return redirect(url_for('signin'))
-    
+
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        if not username or not password:
+            flash("Username and password are required!", "error")
+            return redirect(url_for('signup'))
+
+        # Insert the new user into the database
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("INSERT INTO users (username, password, balance) VALUES (?, ?, ?)",
+                           (username, password, 100))  # Initial balance 100
+            conn.commit()
+            flash("Account created successfully!", "success")
+            return redirect(url_for('home'))
+        except sqlite3.Error as e:
+            flash(f"Error: {e}", "error")
+            conn.rollback()
+        finally:
+            conn.close()
+
     return render_template('signup.html')
 
-# Sign In
-@app.route('/signin', methods=['GET'])
-def signin():
-    username = request.args.get('username')
-    password = request.args.get('password')
-    
-    if username and password:
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        if not username or not password:
+            flash("Username and password are required!", "error")
+            return redirect(url_for('login'))
+
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
         user = cursor.fetchone()
         conn.close()
-        
+
         if user:
-            session['username'] = username
-            return redirect(url_for('funds'))
+            flash("Login successful!", "success")
+            return redirect(url_for('home'))
         else:
-            return "Invalid credentials, please try again."
-    
-    return render_template('signin.html')
+            flash("Invalid username or password!", "error")
+            return redirect(url_for('login'))
 
-# Logout
-@app.route('/logout')
-def logout():
-    session.pop('username', None)
-    return redirect(url_for('index'))
+    return render_template('login.html')
 
-# View Funds
-@app.route('/funds')
-def funds():
-    if is_logged_in():
-        username = session['username']
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT balance FROM users WHERE username = ?", (username,))
-        balance = cursor.fetchone()[0]
-        conn.close()
-        return render_template('funds.html', funds=balance)
-    
-    return redirect(url_for('signin'))
 
-# Transfer Funds
-@app.route('/transfer', methods=['GET'])
-def transfer():
-    if is_logged_in():
-        recipient = request.args.get('recipient')
-        amount = float(request.args.get('amount'))
-        
-        if recipient and amount > 0:
-            sender = session['username']
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute("SELECT balance FROM users WHERE username = ?", (sender,))
-            sender_balance = cursor.fetchone()[0]
-            
-            if sender_balance >= amount:
-                cursor.execute("UPDATE users SET balance = balance - ? WHERE username = ?", (amount, sender))
-                cursor.execute("UPDATE users SET balance = balance + ? WHERE username = ?", (amount, recipient))
-                conn.commit()
-                conn.close()
-                return redirect(url_for('funds'))
-            else:
-                return "Insufficient funds."
-        
-    return redirect(url_for('signin'))
-
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # Initialize the database before starting the application
+    init_db()
     app.run(debug=True)
